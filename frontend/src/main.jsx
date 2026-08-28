@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
 
-const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const API = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "/backend" : "http://127.0.0.1:8000");
 const formatTime = (value) => new Date(value).toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"});
 const formatDate = (value) => new Date(value).toLocaleDateString("fr-FR", {day:"2-digit", month:"short"});
 
