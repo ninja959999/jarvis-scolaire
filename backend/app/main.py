@@ -174,7 +174,7 @@ async def gmail_callback(code: str = "", state: str = "", error: str = "", db: S
         raise HTTPException(400, "Retour OAuth invalide")
     issued, signature = state.split(".", 1)
     expected = hmac.new(settings.google_client_secret.encode(), issued.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(signature, expected) or unix_time.time() - int(issued) > 1800:
+    if not hmac.compare_digest(signature, expected) or unix_time.time() - int(issued) > 86400:
         return HTMLResponse("<h2>La session Gmail a expiré</h2><p>Ferme cette page et relance la connexion depuis JARVIS.</p>", status_code=400)
     async with httpx.AsyncClient(timeout=20) as client:
         token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": settings.google_client_id, "client_secret": settings.google_client_secret, "redirect_uri": settings.google_redirect_uri, "grant_type": "authorization_code"})
@@ -191,7 +191,7 @@ async def gmail_callback(code: str = "", state: str = "", error: str = "", db: S
         credential = IntegrationCredential(provider="gmail", access_token=token["access_token"], refresh_token=token.get("refresh_token", ""), expires_at=datetime.utcnow() + timedelta(seconds=int(token.get("expires_in", 3600))), user_id=user.id)
         db.add(credential)
     db.commit()
-    response = HTMLResponse("<h2>Gmail est connecté à JARVIS ✅</h2><p>Tu peux fermer cette fenêtre et retourner dans ton espace.</p>"); response.set_cookie("jarvis_gmail_session", gmail_session_cookie(user.id), httponly=True, secure=True, samesite="lax", max_age=86400); return response
+    response = HTMLResponse("<h2>Gmail est connecté à JARVIS ✅</h2><p>Tu peux fermer cette fenêtre et retourner dans ton espace.</p>"); response.set_cookie("jarvis_gmail_session", gmail_session_cookie(user.id), httponly=True, secure=True, samesite="lax", max_age=30 * 86400); return response
 
 
 @app.get("/api/integrations/gmail/messages")
