@@ -302,9 +302,9 @@ async def gmail_messages(request: Request, db: Session = Depends(get_db)):
 
 @app.post("/api/ai/chat")
 async def ai_chat(payload: dict, db: Session = Depends(get_db)):
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise HTTPException(503, "OPENROUTER_API_KEY non configurée sur le serveur")
+        raise HTTPException(503, "GEMINI_API_KEY non configurée sur le serveur")
     incoming = payload.get("messages", [])[-12:]
     user = current_user(db)
     _, start, end = today_range()
@@ -315,24 +315,30 @@ async def ai_chat(payload: dict, db: Session = Depends(get_db)):
     homework_context = ", ".join("{}: {} (échéance {})".format(x.subject, x.description, x.due_date.strftime("%d/%m")) for x in homeworks[:5])
     reminder_context = ", ".join(x.title for x in reminders[:5])
     daily_context = "Date: {}. Cours: {}. Devoirs: {}. Rappels: {}. Train: {} vers {} à {}.".format(date.today().isoformat(), course_context or "aucun", homework_context or "aucun", reminder_context or "aucun", settings.train_departure_station, settings.train_arrival_station, settings.train_usual_time)
-    messages = [{"role": "system", "content": "Tu es JARVIS, le deuxième cerveau scolaire de l’élève. Réponds en français, clairement et concrètement. Utilise le contexte quotidien pour proposer des actions et un planning. Ne prétends jamais avoir exécuté une action : demande confirmation. Pronote n’est pas encore connecté.\\n\\nContexte quotidien:\\n" + daily_context}]
+    system_text = "Tu es JARVIS, le deuxième cerveau scolaire de l’élève. Réponds en français, clairement et concrètement. Utilise le contexte quotidien pour proposer des actions et un planning. Ne prétends jamais avoir exécuté une action : demande confirmation. Pronote n’est pas encore connecté.\n\nContexte quotidien:\n" + daily_context
+    contents = []
     for item in incoming:
-        role = "assistant" if item.get("role") == "assistant" else "user"
         content = str(item.get("content", "")).strip()[:4000]
         if content:
-            messages.append({"role": role, "content": content})
-    if len(messages) == 1:
+            contents.append({"role": "model" if item.get("role") == "assistant" else "user", "parts": [{"text": content}]})
+    if not contents:
         raise HTTPException(400, "Message vide")
     try:
         async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://jarvis-scolaire.vercel.app", "X-Title": "JARVIS Scolaire"},
-                json={"model": "openrouter/free", "messages": messages, "stream": False},
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                params={"key": api_key},
+                headers={"Content-Type": "application/json"},
+                json={"systemInstruction": {"parts": [{"text": system_text}]}, "contents": contents, "generationConfig": {"temperature": 0.7}},
             )
         if response.status_code >= 400:
-            raise HTTPException(response.status_code, "Le service IA est momentanément indisponible")
+            raise HTTPException(response.status_code, "Gemini est momentanément indisponible")
         result = response.json()
-        return {"message": result["choices"][0]["message"]["content"], "model": result.get("model", "openrouter/free")}
+        candidates = result.get("candidates", [])
+        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+        answer = "".join(str(part.get("text", "")) for part in parts).strip()
+        if not answer:
+            raise HTTPException(502, "Gemini n’a pas retourné de réponse")
+        return {"message": answer, "model": "gemini-2.5-flash"}
     except httpx.TimeoutException:
-        raise HTTPException(504, "Le service IA met trop de temps à répondre")
+        raise HTTPException(504, "Gemini met trop de temps à répondre")
