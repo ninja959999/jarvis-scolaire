@@ -188,11 +188,11 @@ JARVIS est un projet personnel. Les mots de passe Pronote, EduConnect, Supabase 
 
 Le briefing est préparé pour :
 
-- météo : La Loupe ;
+- météo réelle : La Loupe (Open-Meteo, sans clé) ;
 - trajet habituel : gare de La Loupe → gare de Nogent-le-Rotrou ;
 - horaire cible : autour de 07:14.
 
-Ces préférences sont exposées par `GET /api/preferences`. Les horaires SNCF en temps réel nécessiteront ensuite une clé API SNCF et seront ajoutés derrière le backend.
+Ces préférences sont exposées par `GET /api/preferences`. La météo réelle est disponible via `GET /api/weather`. Les horaires SNCF en temps réel nécessiteront ensuite une clé API SNCF et seront ajoutés derrière le backend.
 
 ## Préparation Gmail
 
