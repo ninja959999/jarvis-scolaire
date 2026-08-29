@@ -327,12 +327,12 @@ async def ai_chat(payload: dict, db: Session = Depends(get_db)):
         async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
-                params={"key": api_key},
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
                 json={"systemInstruction": {"parts": [{"text": system_text}]}, "contents": contents, "generationConfig": {"temperature": 0.7}},
             )
         if response.status_code >= 400:
-            raise HTTPException(response.status_code, "Gemini est momentanément indisponible")
+            google_error = response.json().get("error", {}).get("message", "réponse invalide")
+            raise HTTPException(502, "Gemini a refusé la requête : " + google_error)
         result = response.json()
         candidates = result.get("candidates", [])
         parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
