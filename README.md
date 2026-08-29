@@ -1,10 +1,81 @@
-# JARVIS Scolaire & Quotidien
+# JARVIS Scolaire
 
-Un deuxième cerveau personnel pour l'emploi du temps, les devoirs, les rappels et le sport.
+JARVIS est ton espace personnel pour regrouper ton emploi du temps, tes devoirs, tes rappels et bientôt ton tuteur IA. L’objectif est d’avoir un seul endroit simple, accessible depuis ton téléphone et ton ordinateur.
 
-## Démarrage local
+## Où en est le projet ?
 
-### Backend
+### Déjà disponible
+
+- Dashboard avec briefing du jour
+- Date et calendrier dynamiques
+- Pages séparées : accueil, calendrier, cours/devoirs, objectifs, profil
+- Checklist du soir synchronisée
+- Rappels enregistrés dans la base de données
+- Tuteur IA connecté à OpenRouter
+- Interface responsive avec animations et icônes
+- Déploiement automatique depuis GitHub vers Vercel
+- Base de données Supabase avec RLS activé
+
+### En préparation
+
+- Connexion réelle à Pronote via l’ENT Net’O Centre / EduConnect
+- Import des cours, devoirs et notes Pronote
+- Connexion Google Calendar
+- Dépôt de cours et documents
+- Fiches de révision, quiz et explications par l’IA
+- Actions contrôlées par l’IA : créer un rappel, ajouter un devoir ou organiser une séance
+
+## Architecture
+
+```text
+frontend React/Vite
+        │
+        ▼
+Vercel Services
+  ├── web : interface
+  └── api : FastAPI
+        │
+        ├── Supabase : données
+        ├── OpenRouter : tuteur IA
+        └── Pronote : synchronisation à venir
+```
+
+Le frontend ne contient jamais les clés secrètes. Les appels IA et les futures connexions Pronote passent par le backend FastAPI.
+
+## Utiliser JARVIS en ligne
+
+Le projet est relié à GitHub et Vercel.
+
+1. Modifier le code sur GitHub.
+2. Faire un commit sur la branche `main`.
+3. Vercel lance automatiquement un nouveau déploiement.
+4. Ouvrir l’URL Vercel et faire `Ctrl + F5` si l’ancien affichage reste en cache.
+
+Le dossier `frontend` contient l’interface. Le dossier `backend` contient l’API.
+
+## Variables d’environnement
+
+À configurer dans Vercel, dans **Settings → Environment Variables** :
+
+| Variable | Utilité |
+|---|---|
+| `DATABASE_URL` | Connexion PostgreSQL/Supabase |
+| `OPENROUTER_API_KEY` | Clé secrète du tuteur IA |
+
+Pour les futures connexions Pronote, les identifiants ne doivent pas être commités dans Git. Ils seront stockés de façon sécurisée, après validation du fonctionnement de l’ENT :
+
+| Variable prévue | Utilité |
+|---|---|
+| `PRONOTE_URL` | URL directe de l’espace Pronote |
+| `PRONOTE_ENT` | Type d’ENT, ici Net’O Centre / EduConnect |
+
+Ne jamais mettre une clé API, un mot de passe ou un token dans `main.jsx`, `style.css`, un fichier public ou un commit GitHub.
+
+## Lancer le projet sur l’ordinateur
+
+### Backend FastAPI
+
+Depuis la racine du projet :
 
 ```powershell
 cd backend
@@ -14,9 +85,12 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-API disponible sur http://127.0.0.1:8000 et documentation sur http://127.0.0.1:8000/docs.
+API locale : http://127.0.0.1:8000  
+Documentation : http://127.0.0.1:8000/docs
 
 ### Frontend
+
+Dans un autre terminal :
 
 ```powershell
 cd frontend
@@ -24,13 +98,87 @@ npm install
 npm run dev
 ```
 
-## Configuration
+Si le frontend doit parler à l’API locale, utiliser :
 
-Copier `backend/.env.example` vers `backend/.env`. Pour la première version, l'application fonctionne sans Pronote : elle contient des données de démonstration rechargeables depuis le tableau de bord.
+```text
+VITE_API_URL=http://127.0.0.1:8000
+```
 
-## Déploiement gratuit
+## Connexion Pronote : plan prévu
 
-Le backend peut être déployé comme Web Service Render avec la commande `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Pour une vraie mise en ligne, remplacer SQLite par PostgreSQL via `DATABASE_URL` avant le déploiement.
+L’établissement utilise un portail Net’O Centre avec EduConnect. L’URL directe Pronote à utiliser est :
 
-Les identifiants Pronote ne doivent jamais être commités dans Git.
+```text
+https://0280036m.index-education.net/pronote/eleve.html
+```
 
+Il ne faut pas conserver le paramètre `?identifiant=...` : il peut être temporaire.
+
+La connexion sera construite en plusieurs étapes :
+
+1. Vérifier que le lycée a publié l’espace Pronote.
+2. Tester la connexion ENT avec l’adaptateur `ac_orleans_tours`.
+3. Récupérer les cours, devoirs et notes.
+4. Convertir ces données au format JARVIS.
+5. Enregistrer les données dans Supabase.
+6. Ajouter un bouton de synchronisation et une synchronisation automatique.
+
+La bibliothèque utilisée sera testée avec prudence car l’API Pronote n’est pas une API publique officielle pour les comptes élèves. Si l’établissement modifie son accès, il faudra adapter le connecteur.
+
+## Tuteur IA
+
+Le tuteur utilise actuellement OpenRouter avec le routeur gratuit :
+
+```text
+openrouter/free
+```
+
+Le frontend appelle :
+
+```text
+POST /api/ai/chat
+```
+
+Le backend envoie uniquement les messages nécessaires au modèle. Plus tard, l’IA pourra recevoir le contexte autorisé de l’élève : devoirs, cours du jour et documents sélectionnés.
+
+Les actions de l’IA seront limitées et demanderont confirmation avant toute modification :
+
+- créer un rappel ;
+- ajouter un devoir ;
+- modifier une tâche ;
+- préparer une séance de révision ;
+- synchroniser un calendrier.
+
+## Ajouter une nouvelle fonctionnalité
+
+Pour chaque fonctionnalité :
+
+1. Ajouter ou modifier la route FastAPI.
+2. Ajouter les données nécessaires dans Supabase.
+3. Ajouter la vue correspondante dans `frontend/src/main.jsx`.
+4. Ajouter le style dans `frontend/src/style.css` et `frontend/public/style.css`.
+5. Tester localement.
+6. Commit sur `main`.
+7. Vérifier le déploiement Vercel.
+
+## Dépannage rapide
+
+### L’ancienne version s’affiche
+
+Attendre la fin du déploiement, puis faire `Ctrl + F5). Vérifier que Vercel déploie bien la branche `main`.
+
+### L’IA ne répond pas
+
+Vérifier que `OPENROUTER_API_KEY` est bien présente dans Vercel, environnement **Production**, puis redéployer.
+
+### L’API ne répond pas
+
+Vérifier les logs Vercel et l’URL `/health`.
+
+### Pronote affiche “site indisponible”
+
+Ce message vient de l’établissement : l’espace Pronote n’est pas encore publié. Ce n’est pas une erreur de JARVIS.
+
+## Règle importante
+
+JARVIS est un projet personnel. Les mots de passe Pronote, EduConnect, Supabase et les clés IA restent privés et ne doivent jamais apparaître dans une capture d’écran, un message ou GitHub.
