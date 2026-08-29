@@ -1,5 +1,5 @@
 from datetime import date, datetime, time, timedelta
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
@@ -11,7 +11,7 @@ import hmac
 import time as unix_time
 from urllib.parse import urlencode
 from .database import Base, engine, get_db
-from .models import DailyLog, Homework, IntegrationCredential, Reminder, TimetableEntry
+from .models import DailyLog, Homework, IntegrationCredential, Reminder, TimetableEntry, User
 from .schemas import *
 from .seed import ensure_demo_data
 from .settings import settings
@@ -123,6 +123,27 @@ async def weather():
         raise HTTPException(502, "Météo indisponible pour le moment")
 
 
+
+
+def gmail_session_cookie(user_id: int):
+    issued = str(int(unix_time.time()))
+    raw = f"{user_id}.{issued}"
+    signature = hmac.new(settings.google_client_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
+    return f"{raw}.{signature}"
+
+
+def verify_gmail_session(value: str):
+    try:
+        user_id, issued, signature = value.split(".", 2)
+        raw = f"{user_id}.{issued}"
+        expected = hmac.new(settings.google_client_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
+        if unix_time.time() - int(issued) > 86400 or not hmac.compare_digest(signature, expected):
+            return None
+        return int(user_id)
+    except (ValueError, TypeError):
+        return None
+
+
 @app.get("/api/integrations/gmail/status")
 def gmail_status(db: Session = Depends(get_db)):
     user = current_user(db)
@@ -170,12 +191,17 @@ async def gmail_callback(code: str = "", state: str = "", error: str = "", db: S
         credential = IntegrationCredential(provider="gmail", access_token=token["access_token"], refresh_token=token.get("refresh_token", ""), expires_at=datetime.utcnow() + timedelta(seconds=int(token.get("expires_in", 3600))), user_id=user.id)
         db.add(credential)
     db.commit()
-    return HTMLResponse("<h2>Gmail est connecté à JARVIS ✅</h2><p>Tu peux fermer cette fenêtre et retourner dans ton espace.</p>")
+    response = HTMLResponse("<h2>Gmail est connecté à JARVIS ✅</h2><p>Tu peux fermer cette fenêtre et retourner dans ton espace.</p>"); response.set_cookie("jarvis_gmail_session", gmail_session_cookie(user.id), httponly=True, secure=True, samesite="lax", max_age=86400); return response
 
 
 @app.get("/api/integrations/gmail/messages")
-async def gmail_messages(db: Session = Depends(get_db)):
-    user = current_user(db)
+async def gmail_messages(request: Request, db: Session = Depends(get_db)):
+    session_user_id = verify_gmail_session(request.cookies.get("jarvis_gmail_session", ""))
+    if not session_user_id:
+        raise HTTPException(401, "Session Gmail absente ou expirée")
+    user = db.get(User, session_user_id)
+    if not user:
+        raise HTTPException(401, "Utilisateur inconnu")
     credential = db.scalar(select(IntegrationCredential).where(IntegrationCredential.user_id == user.id, IntegrationCredential.provider == "gmail"))
     if not credential:
         raise HTTPException(401, "Gmail n’est pas connecté")
