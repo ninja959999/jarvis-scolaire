@@ -137,7 +137,7 @@ def verify_gmail_session(value: str):
         user_id, issued, signature = value.split(".", 2)
         raw = f"{user_id}.{issued}"
         expected = hmac.new(settings.google_client_secret.encode(), raw.encode(), hashlib.sha256).hexdigest()
-        if unix_time.time() - int(issued) > 86400 or not hmac.compare_digest(signature, expected):
+        if unix_time.time() - int(issued) > 30 * 86400 or not hmac.compare_digest(signature, expected):
             return None
         return int(user_id)
     except (ValueError, TypeError):
