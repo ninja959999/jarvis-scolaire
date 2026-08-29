@@ -3,6 +3,8 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+import httpx
+import os
 from .database import Base, engine, get_db
 from .models import DailyLog, Homework, Reminder, TimetableEntry
 from .schemas import *
@@ -92,3 +94,32 @@ def update_today_log(payload: DailyLogUpdate, db: Session = Depends(get_db)):
 def sync_demo(db: Session = Depends(get_db)):
     ensure_demo_data(db)
     return {"message": "Données de démonstration synchronisées", "pronote_connected": False}
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(payload: dict):
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        raise HTTPException(503, "OPENROUTER_API_KEY non configurée sur le serveur")
+    incoming = payload.get("messages", [])[-12:]
+    messages = [{"role": "system", "content": "Tu es JARVIS, un tuteur scolaire français, clair, encourageant et concis. Aide l’élève à comprendre, réviser et s’organiser. Ne prétends pas connaître une information absente du contexte."}]
+    for item in incoming:
+        role = "assistant" if item.get("role") == "assistant" else "user"
+        content = str(item.get("content", "")).strip()[:4000]
+        if content:
+            messages.append({"role": role, "content": content})
+    if len(messages) == 1:
+        raise HTTPException(400, "Message vide")
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://jarvis-scolaire.vercel.app", "X-Title": "JARVIS Scolaire"},
+                json={"model": "openrouter/free", "messages": messages, "stream": False},
+            )
+        if response.status_code >= 400:
+            raise HTTPException(response.status_code, "Le service IA est momentanément indisponible")
+        result = response.json()
+        return {"message": result["choices"][0]["message"]["content"], "model": result.get("model", "openrouter/free")}
+    except httpx.TimeoutException:
+        raise HTTPException(504, "Le service IA met trop de temps à répondre")
