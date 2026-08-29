@@ -52,3 +52,13 @@ class DailyLog(Base):
     sport_done: Mapped[bool] = mapped_column(Boolean, default=False)
     homeworks_completed_ratio: Mapped[float] = mapped_column(Float, default=0)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+
+class IntegrationCredential(Base):
+    __tablename__ = "integration_credentials"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    access_token: Mapped[str] = mapped_column(Text)
+    refresh_token: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
