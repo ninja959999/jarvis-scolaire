@@ -127,7 +127,7 @@ La bibliothèque utilisée sera testée avec prudence car l’API Pronote n’es
 
 ## Tuteur IA
 
-Le cerveau principal utilise Gemini 2.5 Flash via l’API Gemini. Le frontend ne parle jamais directement à Google : le backend FastAPI protège la clé et ajoute le contexte quotidien autorisé.
+Le cerveau principal utilise Gemini 3.6 Flash via l’API Gemini. Le frontend ne parle jamais directement à Google : le backend FastAPI protège la clé et ajoute le contexte quotidien autorisé.
 
 Pour créer la clé :
 
