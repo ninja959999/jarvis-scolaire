@@ -8,6 +8,7 @@ import httpx
 import os
 import hashlib
 import hmac
+import secrets
 import time as unix_time
 from urllib.parse import urlencode
 from .database import Base, engine, get_db
@@ -152,9 +153,7 @@ def gmail_status(db: Session = Depends(get_db)):
 
 
 def gmail_state():
-    issued = str(int(unix_time.time()))
-    signature = hmac.new(settings.google_client_secret.encode(), issued.encode(), hashlib.sha256).hexdigest()
-    return f"{issued}.{signature}"
+    return secrets.token_urlsafe(32)
 
 
 @app.get("/api/integrations/gmail/start")
@@ -163,18 +162,17 @@ def gmail_start():
         raise HTTPException(503, "Identifiants Google OAuth non configurés")
     state = gmail_state()
     params = {"client_id": settings.google_client_id, "redirect_uri": settings.google_redirect_uri, "response_type": "code", "access_type": "offline", "prompt": "consent", "scope": "https://www.googleapis.com/auth/gmail.readonly", "state": state}
-    return RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params))
+    response = RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params))
+    response.set_cookie("jarvis_gmail_oauth_state", state, httponly=True, secure=True, samesite="lax", max_age=600)
+    return response
 
 
 @app.get("/api/integrations/gmail/callback", response_class=HTMLResponse)
-async def gmail_callback(code: str = "", state: str = "", error: str = "", db: Session = Depends(get_db)):
+async def gmail_callback(request: Request, code: str = "", state: str = "", error: str = "", db: Session = Depends(get_db)):
     if error:
         return HTMLResponse("<h2>Connexion Gmail annulée</h2><p>Tu peux fermer cette fenêtre et revenir dans JARVIS.</p>", status_code=400)
-    if not code or "." not in state:
-        raise HTTPException(400, "Retour OAuth invalide")
-    issued, signature = state.split(".", 1)
-    expected = hmac.new(settings.google_client_secret.encode(), issued.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(signature, expected) or unix_time.time() - int(issued) > 86400:
+    expected_state = request.cookies.get("jarvis_gmail_oauth_state", "")
+    if not code or not expected_state or not hmac.compare_digest(expected_state, state):
         return HTMLResponse("<h2>La session Gmail a expiré</h2><p>Ferme cette page et relance la connexion depuis JARVIS.</p>", status_code=400)
     async with httpx.AsyncClient(timeout=20) as client:
         token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": settings.google_client_id, "client_secret": settings.google_client_secret, "redirect_uri": settings.google_redirect_uri, "grant_type": "authorization_code"})
@@ -191,7 +189,7 @@ async def gmail_callback(code: str = "", state: str = "", error: str = "", db: S
         credential = IntegrationCredential(provider="gmail", access_token=token["access_token"], refresh_token=token.get("refresh_token", ""), expires_at=datetime.utcnow() + timedelta(seconds=int(token.get("expires_in", 3600))), user_id=user.id)
         db.add(credential)
     db.commit()
-    response = HTMLResponse("<h2>Gmail est connecté à JARVIS ✅</h2><p>Tu peux fermer cette fenêtre et retourner dans ton espace.</p>"); response.set_cookie("jarvis_gmail_session", gmail_session_cookie(user.id), httponly=True, secure=True, samesite="lax", max_age=30 * 86400); return response
+    response = HTMLResponse("<h2>Gmail est connecté à JARVIS ✅</h2><p>Tu peux fermer cette fenêtre et retourner dans ton espace.</p>"); response.set_cookie("jarvis_gmail_session", gmail_session_cookie(user.id), httponly=True, secure=True, samesite="lax", max_age=30 * 86400); response.delete_cookie("jarvis_gmail_oauth_state"); return response
 
 
 @app.get("/api/integrations/gmail/messages")
