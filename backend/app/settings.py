@@ -9,6 +9,13 @@ class Settings(BaseSettings):
     pronote_url: str = ""
     pronote_username: str = ""
     pronote_password: str = ""
+    weather_city: str = "La Loupe"
+    train_departure_station: str = "La Loupe"
+    train_arrival_station: str = "Nogent-le-Rotrou"
+    train_usual_time: str = "07:14"
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
