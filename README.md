@@ -11,7 +11,7 @@ JARVIS est ton espace personnel pour regrouper ton emploi du temps, tes devoirs,
 - Pages séparées : accueil, calendrier, cours/devoirs, objectifs, profil
 - Checklist du soir synchronisée
 - Rappels enregistrés dans la base de données
-- Tuteur IA connecté à OpenRouter
+- Tuteur IA connecté à Gemini
 - Interface responsive avec animations et icônes
 - Déploiement automatique depuis GitHub vers Vercel
 - Base de données Supabase avec RLS activé
@@ -36,7 +36,7 @@ Vercel Services
   └── api : FastAPI
         │
         ├── Supabase : données
-        ├── OpenRouter : tuteur IA
+        ├── Gemini API : cerveau principal de JARVIS
         └── Pronote : synchronisation à venir
 ```
 
@@ -60,7 +60,7 @@ Le dossier `frontend` contient l’interface. Le dossier `backend` contient l’
 | Variable | Utilité |
 |---|---|
 | `DATABASE_URL` | Connexion PostgreSQL/Supabase |
-| `OPENROUTER_API_KEY` | Clé secrète du tuteur IA |
+| `GEMINI_API_KEY` | Clé secrète du cerveau Gemini |
 
 Pour les futures connexions Pronote, les identifiants ne doivent pas être commités dans Git. Ils seront stockés de façon sécurisée, après validation du fonctionnement de l’ENT :
 
@@ -127,11 +127,16 @@ La bibliothèque utilisée sera testée avec prudence car l’API Pronote n’es
 
 ## Tuteur IA
 
-Le tuteur utilise actuellement OpenRouter avec le routeur gratuit :
+Le cerveau principal utilise Gemini 2.5 Flash via l’API Gemini. Le frontend ne parle jamais directement à Google : le backend FastAPI protège la clé et ajoute le contexte quotidien autorisé.
 
-```text
-openrouter/free
-```
+Pour créer la clé :
+
+1. Ouvrir [Google AI Studio](https://aistudio.google.com/apikey).
+2. Cliquer sur **Create API key** et choisir le projet Google Cloud `JARVIS Scolaire`.
+3. Dans Vercel, ajouter la variable secrète `GEMINI_API_KEY` pour **Production**.
+4. Redéployer le projet.
+
+Le frontend appelle :
 
 Le frontend appelle :
 
@@ -169,7 +174,7 @@ Attendre la fin du déploiement, puis faire `Ctrl + F5). Vérifier que Vercel d�
 
 ### L’IA ne répond pas
 
-Vérifier que `OPENROUTER_API_KEY` est bien présente dans Vercel, environnement **Production**, puis redéployer.
+Vérifier que `GEMINI_API_KEY` est bien présente dans Vercel, environnement **Production**, puis redéployer.
 
 ### L’API ne répond pas
 
