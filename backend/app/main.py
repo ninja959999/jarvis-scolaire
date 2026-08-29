@@ -26,6 +26,17 @@ def current_user(db: Session):
     return ensure_demo_data(db)
 
 
+def memory_context(db: Session, user_id: int, limit: int = 12):
+    now = datetime.utcnow()
+    memories = db.scalars(
+        select(Memory)
+        .where(Memory.user_id == user_id, or_(Memory.expires_at.is_(None), Memory.expires_at > now))
+        .order_by(Memory.importance.desc(), Memory.updated_at.desc())
+        .limit(limit)
+    ).all()
+    return "\n".join("- [{} | importance {}/5] {}".format(item.category, item.importance, item.content) for item in memories) or "aucune mémoire enregistrée"
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "jarvis-api", "database": settings.database_url.split(":", 1)[0]}
@@ -322,6 +333,7 @@ async def proactive_assistant(request: Request, db: Session = Depends(get_db)):
     courses = db.scalars(select(TimetableEntry).where(TimetableEntry.user_id == user.id, TimetableEntry.start_time >= start, TimetableEntry.start_time < end).order_by(TimetableEntry.start_time)).all()
     reminders = db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.is_completed == False).order_by(Reminder.trigger_time)).all()
     signals = ["Date : " + date.today().isoformat(), "Cours : " + (", ".join("{} à {}".format(x.subject, x.start_time.strftime("%H:%M")) for x in courses) or "aucun"), "Devoirs : " + (", ".join("{} — {}".format(x.subject, x.description) for x in homeworks[:5]) or "aucun"), "Rappels : " + (", ".join(x.title for x in reminders[:5]) or "aucun"), "Trajet habituel : {} vers {} autour de {}.".format(settings.train_departure_station, settings.train_arrival_station, settings.train_usual_time)]
+    memories = memory_context(db, user.id)
     weather_info = "Météo indisponible"
     try:
         current_weather = await weather()
@@ -337,7 +349,7 @@ async def proactive_assistant(request: Request, db: Session = Depends(get_db)):
         gmail_info = "Mails non lus récents : " + (", ".join("{} de {}".format(x.get("subject"), x.get("from")) for x in recent[:8]) or "aucun")
     except HTTPException:
         pass
-    prompt = "Tu es JARVIS, un assistant scolaire proactif. Réponds en français en 4 lignes maximum. Analyse ces signaux et donne un briefing concret : une priorité, une alerte éventuelle et une prochaine action. Ne prétends jamais avoir envoyé un mail ou modifié une donnée. Signaux : " + " ".join(signals) + " " + weather_info + " " + gmail_info
+    prompt = "Tu es JARVIS, un assistant scolaire proactif. Réponds en français en 4 lignes maximum. Analyse ces signaux et donne un briefing concret : une priorité, une alerte éventuelle et une prochaine action. Ne prétends jamais avoir envoyé un mail ou modifié une donnée. Signaux : " + " ".join(signals) + " " + weather_info + " " + gmail_info + " Mémoire utile de l’élève : " + memories
     try:
         async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(
@@ -373,7 +385,8 @@ async def ai_chat(payload: dict, db: Session = Depends(get_db)):
     homework_context = ", ".join("{}: {} (échéance {})".format(x.subject, x.description, x.due_date.strftime("%d/%m")) for x in homeworks[:5])
     reminder_context = ", ".join(x.title for x in reminders[:5])
     daily_context = "Date: {}. Cours: {}. Devoirs: {}. Rappels: {}. Train: {} vers {} à {}.".format(date.today().isoformat(), course_context or "aucun", homework_context or "aucun", reminder_context or "aucun", settings.train_departure_station, settings.train_arrival_station, settings.train_usual_time)
-    system_text = "Tu es JARVIS, le deuxième cerveau scolaire de l’élève. Réponds en français, clairement et concrètement. Utilise le contexte quotidien pour proposer des actions et un planning. Ne prétends jamais avoir exécuté une action : demande confirmation. Pronote n’est pas encore connecté.\n\nContexte quotidien:\n" + daily_context
+    memory_context_text = memory_context(db, user.id)
+    system_text = "Tu es JARVIS, le deuxième cerveau scolaire de l’élève. Réponds en français, clairement et concrètement. Utilise le contexte quotidien et la mémoire persistante pour proposer des actions et un planning. Ne prétends jamais avoir exécuté une action : demande confirmation. Pronote n’est pas encore connecté.\n\nContexte quotidien:\n" + daily_context + "\n\nMémoire persistante de l’élève:\n" + memory_context_text
     contents = []
     for item in incoming:
         content = str(item.get("content", "")).strip()[:4000]
