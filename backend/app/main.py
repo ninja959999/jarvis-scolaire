@@ -101,6 +101,23 @@ def sync_demo(db: Session = Depends(get_db)):
     return {"message": "Données de démonstration synchronisées", "pronote_connected": False}
 
 
+@app.get("/api/weather")
+async def weather():
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            geo = await client.get("https://geocoding-api.open-meteo.com/v1/search", params={"name": settings.weather_city, "count": 1, "language": "fr", "format": "json"})
+            geo.raise_for_status()
+            location = geo.json()["results"][0]
+            forecast = await client.get("https://api.open-meteo.com/v1/forecast", params={"latitude": location["latitude"], "longitude": location["longitude"], "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m", "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code", "forecast_days": 1, "timezone": "Europe/Paris"})
+            forecast.raise_for_status()
+            result = forecast.json()
+            current = result["current"]
+            daily = result["daily"]
+            return {"city": settings.weather_city, "temperature": current["temperature_2m"], "feels_like": current["apparent_temperature"], "weather_code": current["weather_code"], "wind": current["wind_speed_10m"], "max": daily["temperature_2m_max"][0], "min": daily["temperature_2m_min"][0], "rain_probability": daily["precipitation_probability_max"][0]}
+    except (httpx.HTTPError, KeyError, IndexError):
+        raise HTTPException(502, "Météo indisponible pour le moment")
+
+
 @app.post("/api/ai/chat")
 async def ai_chat(payload: dict):
     api_key = os.getenv("OPENROUTER_API_KEY")
