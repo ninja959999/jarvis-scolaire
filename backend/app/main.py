@@ -326,7 +326,7 @@ async def ai_chat(payload: dict, db: Session = Depends(get_db)):
     try:
         async with httpx.AsyncClient(timeout=45) as client:
             response = await client.post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
                 headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
                 json={"systemInstruction": {"parts": [{"text": system_text}]}, "contents": contents, "generationConfig": {"temperature": 0.7}},
             )
@@ -339,6 +339,6 @@ async def ai_chat(payload: dict, db: Session = Depends(get_db)):
         answer = "".join(str(part.get("text", "")) for part in parts).strip()
         if not answer:
             raise HTTPException(502, "Gemini n’a pas retourné de réponse")
-        return {"message": answer, "model": "gemini-2.5-flash"}
+        return {"message": answer, "model": "gemini-3.6-flash"}
     except httpx.TimeoutException:
         raise HTTPException(504, "Gemini met trop de temps à répondre")
