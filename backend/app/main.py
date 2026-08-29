@@ -36,6 +36,46 @@ def preferences():
     return {"weather_city": settings.weather_city, "train": {"departure": settings.train_departure_station, "arrival": settings.train_arrival_station, "usual_time": settings.train_usual_time}, "gmail_ready": bool(settings.google_client_id and settings.google_client_secret)}
 
 
+def today_range():
+    today = date.today()
+    start = datetime.combine(today, time.min)
+    return today, start, start + timedelta(days=1)
+
+
+@app.get("/api/schedule/today")
+def schedule_today(db: Session = Depends(get_db)):
+    user = current_user(db)
+    _, start, end = today_range()
+    return db.scalars(select(TimetableEntry).where(TimetableEntry.user_id == user.id, TimetableEntry.start_time >= start, TimetableEntry.start_time < end).order_by(TimetableEntry.start_time)).all()
+
+
+@app.get("/api/homework")
+def homework_list(db: Session = Depends(get_db)):
+    user = current_user(db)
+    return db.scalars(select(Homework).where(Homework.user_id == user.id, Homework.is_completed == False).order_by(Homework.priority_score.desc(), Homework.due_date)).all()
+
+
+@app.get("/api/reminders")
+def reminder_list(db: Session = Depends(get_db)):
+    user = current_user(db)
+    return db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.is_completed == False).order_by(Reminder.trigger_time)).all()
+
+
+@app.get("/api/train/schedule")
+def train_schedule():
+    return {"status": "configured", "departure": settings.train_departure_station, "arrival": settings.train_arrival_station, "usual_time": settings.train_usual_time, "message": "Horaires SNCF réels disponibles dès que la clé API SNCF est validée."}
+
+
+@app.get("/api/briefing/today")
+def briefing_today(db: Session = Depends(get_db)):
+    user = current_user(db)
+    today, start, end = today_range()
+    homeworks = db.scalars(select(Homework).where(Homework.user_id == user.id, Homework.is_completed == False).order_by(Homework.priority_score.desc(), Homework.due_date)).all()
+    timetable = db.scalars(select(TimetableEntry).where(TimetableEntry.user_id == user.id, TimetableEntry.start_time >= start, TimetableEntry.start_time < end).order_by(TimetableEntry.start_time)).all()
+    reminders = db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.is_completed == False).order_by(Reminder.trigger_time)).all()
+    return {"date": today.isoformat(), "greeting": f"Bonjour, {user.name}", "summary": f"{len(homeworks)} devoir(s) à traiter et {len(timetable)} cours aujourd’hui.", "next_course": timetable[0] if timetable else None, "top_homeworks": homeworks[:3], "reminders": reminders[:3], "train": {"departure": settings.train_departure_station, "arrival": settings.train_arrival_station, "usual_time": settings.train_usual_time}, "weather_city": settings.weather_city, "pronote": {"connected": False, "status": "En attente de la publication de l’espace par ton lycée"}}
+
+
 @app.get("/api/dashboard")
 def dashboard(db: Session = Depends(get_db)):
     user = current_user(db)
