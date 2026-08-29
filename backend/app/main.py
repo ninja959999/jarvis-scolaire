@@ -25,6 +25,11 @@ def health():
     return {"status": "ok", "service": "jarvis-api", "database": settings.database_url.split(":", 1)[0]}
 
 
+@app.get("/api/preferences")
+def preferences():
+    return {"weather_city": settings.weather_city, "train": {"departure": settings.train_departure_station, "arrival": settings.train_arrival_station, "usual_time": settings.train_usual_time}, "gmail_ready": bool(settings.google_client_id and settings.google_client_secret)}
+
+
 @app.get("/api/dashboard")
 def dashboard(db: Session = Depends(get_db)):
     user = current_user(db)
