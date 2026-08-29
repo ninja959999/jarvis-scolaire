@@ -108,6 +108,17 @@ def delete_memory(memory_id: int, db: Session = Depends(get_db)):
     return {"message": "Souvenir oublié"}
 
 
+@app.get("/api/calendar", response_model=list[TimetableOut])
+def calendar_entries(start_date: date | None = None, weeks: int = 1, db: Session = Depends(get_db)):
+    user = current_user(db)
+    selected = start_date or date.today()
+    monday = selected - timedelta(days=selected.weekday())
+    weeks = max(1, min(weeks, 8))
+    start = datetime.combine(monday, time.min)
+    end = start + timedelta(days=weeks * 7)
+    return db.scalars(select(TimetableEntry).where(TimetableEntry.user_id == user.id, TimetableEntry.start_time >= start, TimetableEntry.start_time < end).order_by(TimetableEntry.start_time)).all()
+
+
 @app.get("/api/dashboard")
 def dashboard(db: Session = Depends(get_db)):
     user = current_user(db)
