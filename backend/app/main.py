@@ -1,12 +1,17 @@
 from datetime import date, datetime, time, timedelta
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 import httpx
 import os
+import hashlib
+import hmac
+import time as unix_time
+from urllib.parse import urlencode
 from .database import Base, engine, get_db
-from .models import DailyLog, Homework, Reminder, TimetableEntry
+from .models import DailyLog, Homework, IntegrationCredential, Reminder, TimetableEntry
 from .schemas import *
 from .seed import ensure_demo_data
 from .settings import settings
@@ -116,6 +121,87 @@ async def weather():
             return {"city": settings.weather_city, "temperature": current["temperature_2m"], "feels_like": current["apparent_temperature"], "weather_code": current["weather_code"], "wind": current["wind_speed_10m"], "max": daily["temperature_2m_max"][0], "min": daily["temperature_2m_min"][0], "rain_probability": daily["precipitation_probability_max"][0]}
     except (httpx.HTTPError, KeyError, IndexError):
         raise HTTPException(502, "Météo indisponible pour le moment")
+
+
+@app.get("/api/integrations/gmail/status")
+def gmail_status(db: Session = Depends(get_db)):
+    user = current_user(db)
+    credential = db.scalar(select(IntegrationCredential).where(IntegrationCredential.user_id == user.id, IntegrationCredential.provider == "gmail"))
+    return {"configured": bool(settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri), "connected": credential is not None}
+
+
+def gmail_state():
+    issued = str(int(unix_time.time()))
+    signature = hmac.new(settings.google_client_secret.encode(), issued.encode(), hashlib.sha256).hexdigest()
+    return f"{issued}.{signature}"
+
+
+@app.get("/api/integrations/gmail/start")
+def gmail_start():
+    if not settings.google_client_id or not settings.google_client_secret or not settings.google_redirect_uri:
+        raise HTTPException(503, "Identifiants Google OAuth non configurés")
+    state = gmail_state()
+    params = {"client_id": settings.google_client_id, "redirect_uri": settings.google_redirect_uri, "response_type": "code", "access_type": "offline", "prompt": "consent", "scope": "https://www.googleapis.com/auth/gmail.readonly", "state": state}
+    return RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params))
+
+
+@app.get("/api/integrations/gmail/callback", response_class=HTMLResponse)
+async def gmail_callback(code: str = "", state: str = "", error: str = "", db: Session = Depends(get_db)):
+    if error:
+        return HTMLResponse("<h2>Connexion Gmail annulée</h2><p>Tu peux fermer cette fenêtre et revenir dans JARVIS.</p>", status_code=400)
+    if not code or "." not in state:
+        raise HTTPException(400, "Retour OAuth invalide")
+    issued, signature = state.split(".", 1)
+    expected = hmac.new(settings.google_client_secret.encode(), issued.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(signature, expected) or unix_time.time() - int(issued) > 600:
+        raise HTTPException(400, "Session OAuth expirée")
+    async with httpx.AsyncClient(timeout=20) as client:
+        token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": settings.google_client_id, "client_secret": settings.google_client_secret, "redirect_uri": settings.google_redirect_uri, "grant_type": "authorization_code"})
+    if token_response.status_code >= 400:
+        raise HTTPException(502, "Google n’a pas accepté la connexion")
+    token = token_response.json()
+    user = current_user(db)
+    credential = db.scalar(select(IntegrationCredential).where(IntegrationCredential.user_id == user.id, IntegrationCredential.provider == "gmail"))
+    if credential:
+        credential.access_token = token.get("access_token", credential.access_token)
+        credential.refresh_token = token.get("refresh_token", credential.refresh_token)
+        credential.expires_at = datetime.utcnow() + timedelta(seconds=int(token.get("expires_in", 3600)))
+    else:
+        credential = IntegrationCredential(provider="gmail", access_token=token["access_token"], refresh_token=token.get("refresh_token", ""), expires_at=datetime.utcnow() + timedelta(seconds=int(token.get("expires_in", 3600))), user_id=user.id)
+        db.add(credential)
+    db.commit()
+    return HTMLResponse("<h2>Gmail est connecté à JARVIS ✅</h2><p>Tu peux fermer cette fenêtre et retourner dans ton espace.</p>")
+
+
+@app.get("/api/integrations/gmail/messages")
+async def gmail_messages(db: Session = Depends(get_db)):
+    user = current_user(db)
+    credential = db.scalar(select(IntegrationCredential).where(IntegrationCredential.user_id == user.id, IntegrationCredential.provider == "gmail"))
+    if not credential:
+        raise HTTPException(401, "Gmail n’est pas connecté")
+    access_token = credential.access_token
+    if not credential.expires_at or credential.expires_at <= datetime.utcnow() + timedelta(seconds=60):
+        async with httpx.AsyncClient(timeout=20) as client:
+            refreshed = await client.post("https://oauth2.googleapis.com/token", data={"client_id": settings.google_client_id, "client_secret": settings.google_client_secret, "refresh_token": credential.refresh_token, "grant_type": "refresh_token"})
+        if refreshed.status_code >= 400:
+            raise HTTPException(401, "Autorisation Gmail expirée")
+        refreshed_data = refreshed.json()
+        access_token = refreshed_data["access_token"]
+        credential.access_token = access_token
+        credential.expires_at = datetime.utcnow() + timedelta(seconds=int(refreshed_data.get("expires_in", 3600)))
+        db.commit()
+    headers = {"Authorization": f"Bearer {access_token}"}
+    async with httpx.AsyncClient(timeout=20) as client:
+        listed = await client.get("https://gmail.googleapis.com/gmail/v1/users/me/messages", headers=headers, params={"q": "is:unread newer_than:30d", "maxResults": 10})
+        if listed.status_code >= 400:
+            raise HTTPException(502, "Impossible de lire Gmail")
+        items = []
+        for item in listed.json().get("messages", []):
+            detail = await client.get(f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{item['id']}", headers=headers, params={"format": "metadata", "metadataHeaders": ["Subject", "From", "Date"]})
+            if detail.status_code < 400:
+                headers_map = {h["name"].lower(): h["value"] for h in detail.json().get("payload", {}).get("headers", [])}
+                items.append({"id": item["id"], "subject": headers_map.get("subject", "(sans objet)"), "from": headers_map.get("from", ""), "date": headers_map.get("date", "")})
+    return {"messages": items}
 
 
 @app.post("/api/ai/chat")
