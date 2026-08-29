@@ -51,3 +51,18 @@ class DailyLogOut(DailyLogUpdate):
     date: date
     homeworks_completed_ratio: float
     model_config = ConfigDict(from_attributes=True)
+
+
+class MemoryCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=1000)
+    category: str = Field(default="preference", max_length=40)
+    importance: int = Field(default=3, ge=1, le=5)
+    expires_at: datetime | None = None
+
+
+class MemoryOut(MemoryCreate):
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
