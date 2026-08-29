@@ -174,8 +174,8 @@ async def gmail_callback(code: str = "", state: str = "", error: str = "", db: S
         raise HTTPException(400, "Retour OAuth invalide")
     issued, signature = state.split(".", 1)
     expected = hmac.new(settings.google_client_secret.encode(), issued.encode(), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(signature, expected) or unix_time.time() - int(issued) > 600:
-        raise HTTPException(400, "Session OAuth expirée")
+    if not hmac.compare_digest(signature, expected) or unix_time.time() - int(issued) > 1800:
+        return HTMLResponse("<h2>La session Gmail a expiré</h2><p>Ferme cette page et relance la connexion depuis JARVIS.</p>", status_code=400)
     async with httpx.AsyncClient(timeout=20) as client:
         token_response = await client.post("https://oauth2.googleapis.com/token", data={"code": code, "client_id": settings.google_client_id, "client_secret": settings.google_client_secret, "redirect_uri": settings.google_redirect_uri, "grant_type": "authorization_code"})
     if token_response.status_code >= 400:
