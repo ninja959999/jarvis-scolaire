@@ -182,3 +182,18 @@ Ce message vient de l’établissement : l’espace Pronote n’est pas encore p
 ## Règle importante
 
 JARVIS est un projet personnel. Les mots de passe Pronote, EduConnect, Supabase et les clés IA restent privés et ne doivent jamais apparaître dans une capture d’écran, un message ou GitHub.
+
+
+## Paramètres personnels du briefing
+
+Le briefing est préparé pour :
+
+- météo : La Loupe ;
+- trajet habituel : gare de La Loupe → gare de Nogent-le-Rotrou ;
+- horaire cible : autour de 07:14.
+
+Ces préférences sont exposées par `GET /api/preferences`. Les horaires SNCF en temps réel nécessiteront ensuite une clé API SNCF et seront ajoutés derrière le backend.
+
+## Préparation Gmail
+
+La connexion Gmail se fera avec OAuth 2.0, jamais avec le mot de passe Gmail. L’application demandera d’abord uniquement la lecture des messages autorisés, avec un filtre possible sur les mails scolaires. Les variables prévues sont `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` et `GOOGLE_REDIRECT_URI`. Elles restent dans les variables secrètes Vercel.
