@@ -269,12 +269,21 @@ async def gmail_messages(request: Request, db: Session = Depends(get_db)):
 
 
 @app.post("/api/ai/chat")
-async def ai_chat(payload: dict):
+async def ai_chat(payload: dict, db: Session = Depends(get_db)):
     api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         raise HTTPException(503, "OPENROUTER_API_KEY non configurée sur le serveur")
     incoming = payload.get("messages", [])[-12:]
-    messages = [{"role": "system", "content": "Tu es JARVIS, un tuteur scolaire français, clair, encourageant et concis. Aide l’élève à comprendre, réviser et s’organiser. Ne prétends pas connaître une information absente du contexte."}]
+    user = current_user(db)
+    _, start, end = today_range()
+    homeworks = db.scalars(select(Homework).where(Homework.user_id == user.id, Homework.is_completed == False).order_by(Homework.priority_score.desc(), Homework.due_date)).all()
+    courses = db.scalars(select(TimetableEntry).where(TimetableEntry.user_id == user.id, TimetableEntry.start_time >= start, TimetableEntry.start_time < end).order_by(TimetableEntry.start_time)).all()
+    reminders = db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.is_completed == False).order_by(Reminder.trigger_time)).all()
+    course_context = ", ".join("{} à {}".format(x.subject, x.start_time.strftime("%H:%M")) for x in courses)
+    homework_context = ", ".join("{}: {} (échéance {})".format(x.subject, x.description, x.due_date.strftime("%d/%m")) for x in homeworks[:5])
+    reminder_context = ", ".join(x.title for x in reminders[:5])
+    daily_context = "Date: {}. Cours: {}. Devoirs: {}. Rappels: {}. Train: {} vers {} à {}.".format(date.today().isoformat(), course_context or "aucun", homework_context or "aucun", reminder_context or "aucun", settings.train_departure_station, settings.train_arrival_station, settings.train_usual_time)
+    messages = [{"role": "system", "content": "Tu es JARVIS, le deuxième cerveau scolaire de l’élève. Réponds en français, clairement et concrètement. Utilise le contexte quotidien pour proposer des actions et un planning. Ne prétends jamais avoir exécuté une action : demande confirmation. Pronote n’est pas encore connecté.\\n\\nContexte quotidien:\\n" + daily_context}]
     for item in incoming:
         role = "assistant" if item.get("role") == "assistant" else "user"
         content = str(item.get("content", "")).strip()[:4000]
