@@ -300,6 +300,53 @@ async def gmail_messages(request: Request, db: Session = Depends(get_db)):
     return {"messages": items}
 
 
+@app.get("/api/assistant/proactive")
+async def proactive_assistant(request: Request, db: Session = Depends(get_db)):
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(503, "GEMINI_API_KEY non configurée sur le serveur")
+    user = current_user(db)
+    _, start, end = today_range()
+    homeworks = db.scalars(select(Homework).where(Homework.user_id == user.id, Homework.is_completed == False).order_by(Homework.priority_score.desc(), Homework.due_date)).all()
+    courses = db.scalars(select(TimetableEntry).where(TimetableEntry.user_id == user.id, TimetableEntry.start_time >= start, TimetableEntry.start_time < end).order_by(TimetableEntry.start_time)).all()
+    reminders = db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.is_completed == False).order_by(Reminder.trigger_time)).all()
+    signals = ["Date : " + date.today().isoformat(), "Cours : " + (", ".join("{} à {}".format(x.subject, x.start_time.strftime("%H:%M")) for x in courses) or "aucun"), "Devoirs : " + (", ".join("{} — {}".format(x.subject, x.description) for x in homeworks[:5]) or "aucun"), "Rappels : " + (", ".join(x.title for x in reminders[:5]) or "aucun"), "Trajet habituel : {} vers {} autour de {}.".format(settings.train_departure_station, settings.train_arrival_station, settings.train_usual_time)]
+    weather_info = "Météo indisponible"
+    try:
+        current_weather = await weather()
+        weather_info = "Météo à {} : {}°C, ressenti {}°C, risque de pluie {}%.".format(current_weather.get("city"), current_weather.get("temperature"), current_weather.get("feels_like"), current_weather.get("rain_probability"))
+    except Exception:
+        pass
+    gmail_info = "Gmail non connecté : ne pas parler de mails."
+    gmail_connected = False
+    try:
+        gmail_data = await gmail_messages(request, db)
+        recent = gmail_data.get("messages", [])
+        gmail_connected = True
+        gmail_info = "Mails non lus récents : " + (", ".join("{} de {}".format(x.get("subject"), x.get("from")) for x in recent[:8]) or "aucun")
+    except HTTPException:
+        pass
+    prompt = "Tu es JARVIS, un assistant scolaire proactif. Réponds en français en 4 lignes maximum. Analyse ces signaux et donne un briefing concret : une priorité, une alerte éventuelle et une prochaine action. Ne prétends jamais avoir envoyé un mail ou modifié une donnée. Signaux : " + " ".join(signals) + " " + weather_info + " " + gmail_info
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                json={"contents": [{"role": "user", "parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.5}},
+            )
+        if response.status_code >= 400:
+            raise HTTPException(502, "Gemini a refusé le briefing")
+        result = response.json()
+        candidates = result.get("candidates", [])
+        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
+        answer = "".join(str(part.get("text", "")) for part in parts).strip()
+        if not answer:
+            raise HTTPException(502, "Gemini n’a pas retourné de briefing")
+        return {"message": answer, "gmail_connected": gmail_connected, "generated_at": datetime.utcnow().isoformat()}
+    except httpx.TimeoutException:
+        raise HTTPException(504, "Gemini met trop de temps à préparer le briefing")
+
+
 @app.post("/api/ai/chat")
 async def ai_chat(payload: dict, db: Session = Depends(get_db)):
     api_key = os.getenv("GEMINI_API_KEY")
