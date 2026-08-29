@@ -2,7 +2,7 @@ from datetime import date, datetime, time, timedelta
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 import httpx
 import os
@@ -12,7 +12,7 @@ import secrets
 import time as unix_time
 from urllib.parse import urlencode
 from .database import Base, engine, get_db
-from .models import DailyLog, Homework, IntegrationCredential, Reminder, TimetableEntry, User
+from .models import DailyLog, Homework, IntegrationCredential, Memory, Reminder, TimetableEntry, User
 from .schemas import *
 from .seed import ensure_demo_data
 from .settings import settings
@@ -74,6 +74,38 @@ def briefing_today(db: Session = Depends(get_db)):
     timetable = db.scalars(select(TimetableEntry).where(TimetableEntry.user_id == user.id, TimetableEntry.start_time >= start, TimetableEntry.start_time < end).order_by(TimetableEntry.start_time)).all()
     reminders = db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.is_completed == False).order_by(Reminder.trigger_time)).all()
     return {"date": today.isoformat(), "greeting": f"Bonjour, {user.name}", "summary": f"{len(homeworks)} devoir(s) à traiter et {len(timetable)} cours aujourd’hui.", "next_course": timetable[0] if timetable else None, "top_homeworks": homeworks[:3], "reminders": reminders[:3], "train": {"departure": settings.train_departure_station, "arrival": settings.train_arrival_station, "usual_time": settings.train_usual_time}, "weather_city": settings.weather_city, "pronote": {"connected": False, "status": "En attente de la publication de l’espace par ton lycée"}}
+
+
+@app.get("/api/memories", response_model=list[MemoryOut])
+def list_memories(db: Session = Depends(get_db)):
+    user = current_user(db)
+    now = datetime.utcnow()
+    return db.scalars(
+        select(Memory)
+        .where(Memory.user_id == user.id, or_(Memory.expires_at.is_(None), Memory.expires_at > now))
+        .order_by(Memory.importance.desc(), Memory.updated_at.desc())
+    ).all()
+
+
+@app.post("/api/memories", response_model=MemoryOut)
+def create_memory(payload: MemoryCreate, db: Session = Depends(get_db)):
+    user = current_user(db)
+    item = Memory(**payload.model_dump(), user_id=user.id)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@app.delete("/api/memories/{memory_id}")
+def delete_memory(memory_id: int, db: Session = Depends(get_db)):
+    user = current_user(db)
+    item = db.scalar(select(Memory).where(Memory.id == memory_id, Memory.user_id == user.id))
+    if not item:
+        raise HTTPException(404, "Souvenir introuvable")
+    db.delete(item)
+    db.commit()
+    return {"message": "Souvenir oublié"}
 
 
 @app.get("/api/dashboard")
