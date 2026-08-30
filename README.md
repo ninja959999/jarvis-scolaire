@@ -1,14 +1,5 @@
 # JARVIS Scolaire
 
-Le dépôt regroupe désormais les deux bases du projet :
-
-- `frontend/` : tableau de bord web JARVIS connecté à l’API et à Supabase ;
-- `backend/` : services FastAPI, IA et données ;
-- `mobile/` : application mobile issue de Papillon, rebrandée JARVIS Scolaire ;
-- `supabase/` : migrations de la base cloud.
-
-La version mobile conserve les connecteurs scolaires et les écrans métier de Papillon. La couche JARVIS ajoute progressivement l’assistant, les services personnels et la synchronisation cloud.
-
 JARVIS est ton espace personnel pour regrouper ton emploi du temps, tes devoirs, tes rappels et bientôt ton tuteur IA. L’objectif est d’avoir un seul endroit simple, accessible depuis ton téléphone et ton ordinateur.
 
 ## Où en est le projet ?
