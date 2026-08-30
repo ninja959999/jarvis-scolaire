@@ -172,7 +172,6 @@ def dashboard(db: Session = Depends(get_db)):
 @app.get("/api/agents/status")
 def agents_status(db: Session = Depends(get_db)):
     user = current_user(db)
-    pending_tasks = db.scalar(select(Homework).where(Homework.user_id == user.id, Homework.is_completed == False).count()) if False else None
     pending_homeworks = db.scalars(select(Homework).where(Homework.user_id == user.id, Homework.is_completed == False)).all()
     pending_reminders = db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.is_completed == False)).all()
     pronote_configured = bool(settings.pronote_ent_url or settings.pronote_url)
