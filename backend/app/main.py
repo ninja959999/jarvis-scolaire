@@ -169,6 +169,50 @@ def dashboard(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/agents/status")
+def agents_status(db: Session = Depends(get_db)):
+    user = current_user(db)
+    pending_tasks = db.scalar(select(Homework).where(Homework.user_id == user.id, Homework.is_completed == False).count()) if False else None
+    pending_homeworks = db.scalars(select(Homework).where(Homework.user_id == user.id, Homework.is_completed == False)).all()
+    pending_reminders = db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.is_completed == False)).all()
+    pronote_configured = bool(settings.pronote_ent_url or settings.pronote_url)
+    return {
+        "tutor": {"name": "AI Tutor", "icon": "🧠", "status": "Active" if os.getenv("GEMINI_API_KEY") else "Standby", "info": "Gemini prêt à répondre" if os.getenv("GEMINI_API_KEY") else "Clé Gemini à configurer"},
+        "scheduler": {"name": "Scheduler", "icon": "📅", "status": "Active", "info": "{} devoir(s) et {} rappel(s) à suivre".format(len(pending_homeworks), len(pending_reminders))},
+        "pronote": {"name": "Sync Pronote", "icon": "📊", "status": "Connected" if pronote_configured else "Standby", "info": "ENT configuré, synchronisation à finaliser" if pronote_configured else "ENT du lycée à configurer"},
+        "notifications": {"name": "Notifications", "icon": "🔔", "status": "Active", "info": "{} alerte(s) en attente".format(len(pending_homeworks) + len(pending_reminders))},
+    }
+
+
+@app.get("/api/feed")
+def live_feed(limit: int = 10, db: Session = Depends(get_db)):
+    user = current_user(db)
+    limit = max(1, min(limit, 20))
+    _, start, end = today_range()
+    courses = db.scalars(select(TimetableEntry).where(TimetableEntry.user_id == user.id, TimetableEntry.start_time >= start, TimetableEntry.start_time < end).order_by(TimetableEntry.start_time)).all()
+    homeworks = db.scalars(select(Homework).where(Homework.user_id == user.id, Homework.is_completed == False).order_by(Homework.due_date)).all()
+    reminders = db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.is_completed == False).order_by(Reminder.trigger_time)).all()
+    feed = []
+    for item in courses:
+        feed.append({"time": item.start_time.strftime("%H:%M"), "text": "Emploi du temps : {}{}".format(item.subject, " · " + item.room if item.room else ""), "type": "info"})
+    for item in homeworks[:limit]:
+        feed.append({"time": item.due_date.strftime("%d/%m %H:%M"), "text": "Devoir à traiter : {}".format(item.subject), "type": "warning"})
+    for item in reminders[:limit]:
+        feed.append({"time": item.trigger_time.strftime("%d/%m %H:%M"), "text": "Rappel : {}".format(item.title), "type": "info"})
+    return feed[:limit]
+
+
+@app.get("/api/timeline")
+def timeline(db: Session = Depends(get_db)):
+    user = current_user(db)
+    _, start, end = today_range()
+    courses = db.scalars(select(TimetableEntry).where(TimetableEntry.user_id == user.id, TimetableEntry.start_time >= start, TimetableEntry.start_time < end).order_by(TimetableEntry.start_time)).all()
+    reminders = db.scalars(select(Reminder).where(Reminder.user_id == user.id, Reminder.trigger_time >= start, Reminder.trigger_time < end, Reminder.is_completed == False).order_by(Reminder.trigger_time)).all()
+    events = [{"time": item.start_time.strftime("%H:%M"), "event": item.subject + (" · " + item.room if item.room else "")} for item in courses]
+    events.extend({"time": item.trigger_time.strftime("%H:%M"), "event": "Rappel · " + item.title} for item in reminders)
+    return sorted(events, key=lambda item: item["time"])
+
+
 @app.post("/api/homeworks", response_model=HomeworkOut)
 def create_homework(payload: HomeworkCreate, db: Session = Depends(get_db)):
     user = current_user(db)
