@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = ""
+    fish_api_key: str = ""
+    fish_voice_id: str = "612b878b113047d9a770c069c8b4fdfe"
+    fish_model: str = "s2.1-pro-free"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
