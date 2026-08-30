@@ -77,6 +77,27 @@ def train_schedule():
     return {"status": "configured", "departure": settings.train_departure_station, "arrival": settings.train_arrival_station, "usual_time": settings.train_usual_time, "message": "Horaires SNCF réels disponibles dès que la clé API SNCF est validée."}
 
 
+@app.get("/api/integrations/pronote/status")
+def pronote_status():
+    configured = bool(settings.pronote_ent_url or settings.pronote_url)
+    return {
+        "configured": configured,
+        "provider": settings.pronote_provider,
+        "ent_url": settings.pronote_ent_url,
+        "direct_url": settings.pronote_url,
+        "connected": False,
+        "status": "ENT configuré : ouvre le portail pour terminer la connexion." if configured else "URL ENT Pronote à configurer avec ton lycée.",
+    }
+
+
+@app.get("/api/integrations/pronote/start")
+def pronote_start():
+    target = settings.pronote_ent_url or settings.pronote_url
+    if not target:
+        raise HTTPException(503, "URL ENT Pronote non configurée")
+    return RedirectResponse(target)
+
+
 @app.get("/api/briefing/today")
 def briefing_today(db: Session = Depends(get_db)):
     user = current_user(db)
@@ -320,6 +341,54 @@ async def gmail_messages(request: Request, db: Session = Depends(get_db)):
                 headers_map = {h["name"].lower(): h["value"] for h in detail.json().get("payload", {}).get("headers", [])}
                 items.append({"id": item["id"], "subject": headers_map.get("subject", "(sans objet)"), "from": headers_map.get("from", ""), "date": headers_map.get("date", "")})
     return {"messages": items}
+
+
+@app.get("/api/integrations/gmail/summary")
+async def gmail_summary(request: Request, db: Session = Depends(get_db)):
+    data = await gmail_messages(request, db)
+    items = data.get("messages", [])
+    if not items:
+        return {"message": "Aucun mail non lu récent à résumer.", "messages": [], "generated_at": datetime.utcnow().isoformat()}
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(503, "GEMINI_API_KEY non configurée sur le serveur")
+
+    mail_context = "\n".join(
+        "- Sujet : {subject}\n  Expéditeur : {sender}\n  Date : {date}".format(
+            subject=item.get("subject", "(sans objet)"),
+            sender=item.get("from", "inconnu"),
+            date=item.get("date", "date inconnue"),
+        )
+        for item in items
+    )
+    prompt = (
+        "Tu es JARVIS, assistant scolaire personnel. À partir des métadonnées des mails "
+        "Gmail non lus ci-dessous, rédige un résumé clair en français. Regroupe les sujets "
+        "similaires, signale les messages potentiellement urgents et termine par 1 à 3 actions "
+        "concrètes. N'invente aucun contenu absent des sujets, expéditeurs et dates. "
+        "Si rien ne semble urgent, dis-le clairement.\n\n" + mail_context
+    )
+    async with httpx.AsyncClient(timeout=45) as client:
+        response = await client.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+        )
+    if response.status_code >= 400:
+        try:
+            google_error = response.json().get("error", {}).get("message", "réponse invalide")
+        except ValueError:
+            google_error = "réponse invalide"
+        raise HTTPException(502, "Gemini a refusé le résumé Gmail : " + google_error)
+
+    try:
+        answer = response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError, TypeError):
+        answer = ""
+    if not answer:
+        raise HTTPException(502, "Gemini n'a pas renvoyé de résumé Gmail")
+    return {"message": answer, "messages": items, "generated_at": datetime.utcnow().isoformat()}
 
 
 @app.get("/api/assistant/proactive")
