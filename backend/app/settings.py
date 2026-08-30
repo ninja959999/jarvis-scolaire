@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     dev_user_email: str = "toi@example.com"
     dev_user_name: str = "Toi"
     pronote_url: str = ""
+    pronote_ent_url: str = ""
+    pronote_provider: str = "educonnect"
     pronote_username: str = ""
     pronote_password: str = ""
     weather_city: str = "La Loupe"
