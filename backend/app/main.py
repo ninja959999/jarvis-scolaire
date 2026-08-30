@@ -1,10 +1,11 @@
 from datetime import date, datetime, time, timedelta
 import base64
+import json
 from html import unescape
 import re
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 import httpx
@@ -464,6 +465,82 @@ async def proactive_assistant(request: Request, db: Session = Depends(get_db)):
         return {"message": answer, "gmail_connected": gmail_connected, "generated_at": datetime.utcnow().isoformat()}
     except httpx.TimeoutException:
         raise HTTPException(504, "Gemini met trop de temps à préparer le briefing")
+
+
+@app.post("/api/ai/speak")
+async def ai_speak(payload: dict):
+    text = str(payload.get("text", "")).strip()
+    if not text:
+        raise HTTPException(400, "Texte vocal vide")
+    api_key = os.getenv("FISH_AUDIO_API_KEY")
+    if not api_key:
+        raise HTTPException(503, "FISH_AUDIO_API_KEY non configurée sur le serveur")
+    text = text[:1800]
+    async with httpx.AsyncClient(timeout=45) as client:
+        response = await client.post(
+            "https://api.fish.audio/v1/tts",
+            headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json", "model": settings.fish_model},
+            json={
+                "text": text,
+                "reference_id": settings.fish_voice_id,
+                "format": "mp3",
+                "latency": "balanced",
+                "prosody": {"speed": 1, "volume": 0, "normalize_loudness": True},
+            },
+        )
+    if response.status_code >= 400:
+        raise HTTPException(502, "Fish Audio n’a pas pu générer la voix")
+    return Response(content=response.content, media_type="audio/mpeg")
+
+
+@app.post("/api/ai/memory-learn")
+async def ai_memory_learn(payload: dict, db: Session = Depends(get_db)):
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(503, "GEMINI_API_KEY non configurée sur le serveur")
+    user = current_user(db)
+    messages = payload.get("messages", [])[-6:]
+    if not messages:
+        return {"saved": []}
+    prompt = (
+        "Tu es le module mémoire de JARVIS. Analyse cette conversation et extrais uniquement "
+        "les informations durables qui aideront vraiment cet élève plus tard : préférences, "
+        "objectifs, habitudes ou informations scolaires stables. Ignore les salutations, les "
+        "demandes ponctuelles, les secrets, mots de passe et données sensibles. Retourne uniquement "
+        "un JSON valide sous la forme {\"memories\":[{\"content\":\"...\",\"category\":\"preference|objectif|habitude|scolaire\",\"importance\":1}]} "
+        "avec au maximum 3 éléments. Si rien n’est durable, retourne {\"memories\":[]}.\n\n"
+        + json.dumps(messages, ensure_ascii=False)
+    )
+    async with httpx.AsyncClient(timeout=45) as client:
+        response = await client.post(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
+            headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+            json={"contents": [{"parts": [{"text": prompt}]}]},
+        )
+    if response.status_code >= 400:
+        raise HTTPException(502, "Gemini n’a pas pu analyser la mémoire")
+    try:
+        raw = response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        raw = raw.replace(chr(96) * 3 + "json", "").replace(chr(96) * 3, "").strip()
+        extracted = json.loads(raw).get("memories", [])
+    except (KeyError, IndexError, TypeError, ValueError):
+        extracted = []
+    saved = []
+    for item in extracted[:3]:
+        content = str(item.get("content", "")).strip()[:1000]
+        category = str(item.get("category", "preference")).lower()
+        if not content or category not in ("preference", "objectif", "habitude", "scolaire"):
+            continue
+        importance = max(1, min(5, int(item.get("importance", 3))))
+        existing = db.scalar(select(Memory).where(Memory.user_id == user.id, Memory.content == content))
+        if existing:
+            existing.importance = max(existing.importance, importance)
+            existing.updated_at = datetime.utcnow()
+        else:
+            db.add(Memory(user_id=user.id, content=content, category=category, importance=importance))
+        saved.append(content)
+    db.commit()
+    return {"saved": saved}
 
 
 @app.post("/api/ai/chat")
