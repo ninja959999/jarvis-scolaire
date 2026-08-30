@@ -134,3 +134,12 @@ nav{gap:6px}.nav-label{color:#4d9bb7;letter-spacing:2px}.nav-item{padding:12px 1
 .mail-item small{overflow:hidden;color:#87b2bf;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
 .mail-item em{color:#5d95a8;font-size:9px;font-style:normal}
 @media(max-width:700px){.mail-hero{grid-template-columns:auto 1fr}.mail-hero .primary{grid-column:span 2;width:100%;min-height:41px}.mail-connect{align-items:flex-start;flex-wrap:wrap}.mail-connect .outline-button{width:100%}.mail-list{grid-template-columns:1fr}.mail-summary{padding:18px 16px}.mail-summary p{font-size:12px}.mail-hero h3{font-size:17px}}
+
+
+/* Voice controls and movable notification */
+.bubble{position:relative;padding-right:44px}
+.speak-button{position:absolute;right:9px;bottom:8px;display:grid;place-items:center;width:27px;height:27px;border:1px solid #2b7189;border-radius:9px;background:#0b4057;color:#80eaff;font-size:13px;cursor:pointer;transition:.2s}
+.speak-button:hover{border-color:#66eaff;background:#125d76;box-shadow:0 0 14px #22dfff36}
+.draggable-toast{cursor:grab;touch-action:none;user-select:none}
+.draggable-toast:active{cursor:grabbing}
+.toast-grip{display:inline-block;margin-right:8px;color:#65e5ff;font-size:16px;vertical-align:-1px}
